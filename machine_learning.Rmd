@@ -1,0 +1,115 @@
+Machine Learning Assignment - Classifing Training Activities
+========================================================
+
+This is my writeup for the Coursera Machine Learning Assignment.
+
+## Libraries
+
+In addition to the caret package, I also install doMC to make use of all 4 cores in my PC. 
+Given the time time the the random forst algorithm takes, this should save some time
+
+```{r}
+library(caret)
+library(doMC)
+registerDoMC(cores = 4)
+```
+
+
+## Loading Data
+
+Loading the data is straight-forward. At this point, I define emtpy strings and "NA" as missing data.
+
+```{r}
+raw_train <- read.csv("pml-training.csv",na.strings=c("NA",""))
+raw_test <- read.csv("pml-testing.csv",na.strings=c("NA",""))
+```
+
+## Data Preparation
+
+I adapt some of the data preparation steps presented in the Coursera Disscussion Thread 
+https://class.coursera.org/predmachlearn-002/forum/thread?thread_id=119
+The steps replicate my own data preparation strategy, but are shorter.
+The approach first finds all columns in the training dataset that only contain NAs and saves the 
+indices of these columns. The coloums are then removed from both the training and the testing dataset.
+
+In a second step, some further columns are removed, that are not important to the training task:
+
+- The Timestamp
+- The Username
+- Information on the Windows
+
+```{r}
+NAs <- apply(raw_train,2,function(x) {sum(is.na(x))}) 
+raw_train <- raw_train[,which(NAs == 0)]
+raw_test <- raw_test[,which(NAs == 0)]
+removeIndex <- grep("timestamp|X|user_name|new_window",names(raw_train))
+train_all <- raw_train[,-removeIndex]
+test_all <- raw_test[,-removeIndex]
+```
+
+
+## Data Preparation 2 - Sampling
+
+Here, I take a sample of 20% of the data from the testset. I do this for two reason.
+
+1) It makes for faster training. Random forest, especially with the cross-validation approach used
+here, would otherwise take too long to train.
+2) It allows me to test the out-of-sample accuracy of my model on the remaining datasets in the 
+training set. Since random forest have a tendency towards overtraining, this should help.
+
+```{r}
+train_sample <- train_all[createDataPartition(y = train_all$classe, p=0.2,list=FALSE),]
+```
+
+
+## Training the Model with Cross Validation
+
+I use the trainControl function from the caret package to set up cross-validation. This will help to 
+ensure that my model is not to overfitted. As the prediction model, I use random forest. I make this 
+choice based on the discussion in the orginal paper "Qualitative Activity Recognition of 
+Weight Lifting Exercises" by Velloso et al.
+
+
+```{r}
+ctrl <- trainControl(method = "cv", savePred=T)
+mod <- train(classe~., data=train_sample, method = "rf", trControl = ctrl)
+```
+
+##Applying the Model
+
+I apply the model, both to the full training set and to the test set.
+
+```{r}
+p1 <- predict(mod,newdata= train_all)
+p2 <- predict(mod, newdata = test_all)
+```
+
+## Thoughts on the out-of-sample Error
+
+Looking at the predictions for the full training set against the real data, I see that the accuracy
+of the predict for the full training set if above 98%. Given that the model was only trained on 20% 
+of the training set, the random forest models works well for out of sample cases and I expect good 
+performance on the test set
+
+```{r}
+xtab <- table(p1,train_all$classe)
+xtab
+confusionMatrix(xtab)
+```
+
+## Writing Results to File
+
+The following R code just writes the predict to disk.
+
+```{r}
+result_str <- paste0(p2,collapse="")
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(p2)
+```
